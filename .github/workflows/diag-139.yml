@@ -1,0 +1,111 @@
+name: diag-139
+on:
+  workflow_dispatch:
+    inputs:
+      variants:
+        description: "semicolon-separated: name kind VAR=VAL..."
+        default: "src source;fp flatpak"
+      reps:
+        default: "1"
+      displays:
+        default: '["x11","wayland"]'
+      runtime_commit:
+        description: "optional org.gnome.Platform//50 commit to pin"
+        default: ""
+      url:
+        default: ""
+jobs:
+  build-source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { repository: Stremio/stremio-linux-shell, ref: v1.2.0, path: shell }
+      - name: build v1.2.0 from source (Arch)
+        run: |
+          docker run --rm -v $PWD/shell:/src -w /src archlinux:latest bash -c '
+            pacman -Syu --noconfirm --needed base-devel rust gtk4 libadwaita webkitgtk-6.0 mpv libepoxy gettext glib2 git >/dev/null
+            pacman -Q gtk4 libadwaita webkitgtk-6.0 mesa glib2 > /src/arch-versions.txt
+            cargo build --release 2>&1 | tail -3
+            mkdir -p /src/srcbin/schemas
+            cp target/release/stremio-linux-shell data/server.js /src/srcbin/
+            cp data/com.stremio.Stremio.gschema.xml /src/srcbin/schemas/ && glib-compile-schemas /src/srcbin/schemas
+            chmod -R a+rwX /src/srcbin'
+          cat shell/arch-versions.txt; cp shell/arch-versions.txt shell/srcbin/
+      - uses: actions/upload-artifact@v4
+        with: { name: srcbin, path: shell/srcbin }
+  run:
+    needs: build-source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        disp: ${{ fromJSON(inputs.displays) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: srcbin, path: srcbin }
+      - name: host packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq flatpak xvfb weston wayland-utils imagemagick xdotool python3-pil dbus-x11 >/dev/null
+          chmod +x srcbin/stremio-linux-shell
+          dpkg -l weston flatpak xvfb | tail -3
+      - name: flatpak runtime and official v1.2.0 bundle
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y --noninteractive flathub org.gnome.Platform//50 >/dev/null
+          if [ -n "${{ inputs.runtime_commit }}" ]; then flatpak --user update -y --noninteractive --commit=${{ inputs.runtime_commit }} org.gnome.Platform//50 >/dev/null; fi
+          gh release download v1.2.0 -R Stremio/stremio-linux-shell -p com.stremio.Stremio.Devel.flatpak
+          sha256sum com.stremio.Stremio.Devel.flatpak
+          flatpak --user install -y --noninteractive com.stremio.Stremio.Devel.flatpak >/dev/null
+          flatpak --user info org.gnome.Platform//50 | grep -E 'Version|Commit|Date|Installed'
+          flatpak --user info com.stremio.Stremio.Devel | grep -E 'Version|Commit|Runtime|Date'
+          flatpak --user list --columns=ref,version,active
+          flatpak run --user --command=python3 org.gnome.Platform//50 -c 'import gi; gi.require_version("Gtk","4.0"); gi.require_version("WebKit","6.0"); from gi.repository import Gtk, WebKit; print("runtime WebKitGTK", WebKit.get_major_version(), WebKit.get_minor_version(), WebKit.get_micro_version(), "GTK", Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version())'
+          flatpak --version
+          flatpak --user remote-info --log flathub org.gnome.Platform//50 | grep -E '^ *(Commit|Date|Subject)' | head -60
+      - name: source runtime image (Arch)
+        run: |
+          printf 'FROM archlinux:latest\nRUN pacman -Syu --noconfirm --needed gtk4 libadwaita webkitgtk-6.0 mpv libepoxy nodejs dbus mesa >/dev/null && pacman -Q gtk4 libadwaita webkitgtk-6.0 mesa nodejs\n' > Dockerfile.src
+          docker build -q -t stremio-src -f Dockerfile.src . && docker run --rm stremio-src pacman -Q gtk4 libadwaita webkitgtk-6.0 mesa
+          cat srcbin/arch-versions.txt
+      - name: display server
+        run: |
+          mkdir -p -m 700 /tmp/xdg
+          if [ "${{ matrix.disp }}" = x11 ]; then
+            nohup Xvfb :99 -screen 0 1920x1080x24 > /tmp/xvfb.log 2>&1 &
+            sleep 2; DISPLAY=:99 xdpyinfo | head -5 || true
+          else
+            XDG_RUNTIME_DIR=/tmp/xdg nohup weston --backend=headless --renderer=gl --width=1920 --height=1080 --shell=kiosk --debug --socket=wayland-1 > /tmp/weston.log 2>&1 &
+            sleep 4
+            if [ ! -S /tmp/xdg/wayland-1 ]; then echo "gl renderer failed, using pixman"; cat /tmp/weston.log | tail -5
+              XDG_RUNTIME_DIR=/tmp/xdg nohup weston --backend=headless --renderer=pixman --width=1920 --height=1080 --shell=kiosk --debug --socket=wayland-1 > /tmp/weston.log 2>&1 &
+              sleep 4; fi
+            grep -iE 'renderer|EGL|GL_RENDERER|dmabuf' /tmp/weston.log | head -10
+            XDG_RUNTIME_DIR=/tmp/xdg WAYLAND_DISPLAY=wayland-1 wayland-info 2>/dev/null | grep -E "interface: '(zwp_linux_dmabuf_v1|wp_linux_drm_syncobj|wl_shm|xdg_wm_base)'" || true
+          fi
+      - name: matrix
+        env:
+          VARIANTS: ${{ inputs.variants }}
+          REPS: ${{ inputs.reps }}
+          URL: ${{ inputs.url }}
+        run: |
+          export XDG_RUNTIME_DIR=/tmp/xdg
+          dbus-run-session -- bash -c '
+            IFS=";" read -ra vs <<< "$VARIANTS"
+            for r in $(seq 1 $REPS); do for v in "${vs[@]}"; do
+              read -ra a <<< "$v"
+              bash diag/run.sh "${{ matrix.disp }}-${a[0]}-r$r" "${a[1]}" "${{ matrix.disp }}" "${a[@]:2}"
+              sleep 3
+            done; done'
+      - name: summary
+        if: always()
+        run: for f in out/*/steps.txt; do echo "===== $f"; cat "$f"; done
+      - name: app log excerpts
+        if: always()
+        run: for f in out/*/app.log; do echo "===== $f"; grep -iE 'error|warn|crit|egl|dmabuf|gbm|renderer|fail' "$f" | grep -v ' DEBUG ' | sort | uniq -c | sort -rn | head -25; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: "out-${{ matrix.disp }}", path: out }
