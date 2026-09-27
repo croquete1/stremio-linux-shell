@@ -1,5 +1,7 @@
 name: diag-139
 on:
+  push:
+    branches: [diag/139-flatpak-black-screen]
   workflow_dispatch:
     inputs:
       variants:
@@ -40,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        disp: ${{ fromJSON(inputs.displays) }}
+        disp: ${{ fromJSON(inputs.displays || '["x11","wayland"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -88,8 +90,8 @@ jobs:
           fi
       - name: matrix
         env:
-          VARIANTS: ${{ inputs.variants }}
-          REPS: ${{ inputs.reps }}
+          VARIANTS: ${{ inputs.variants || 'src source;fp flatpak' }}
+          REPS: ${{ inputs.reps || '1' }}
           URL: ${{ inputs.url }}
         run: |
           export XDG_RUNTIME_DIR=/tmp/xdg
