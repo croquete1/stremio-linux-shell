@@ -79,10 +79,10 @@ jobs:
         run: |
           flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
           flatpak --user install -y --noninteractive flathub org.gnome.Platform//50 >/dev/null
-          if [ -n "${{ inputs.runtime_commit }}" ]; then flatpak --user update -y --noninteractive --commit=${{ inputs.runtime_commit }} org.gnome.Platform//50 >/dev/null; fi
           gh release download v1.2.0 -R Stremio/stremio-linux-shell -p com.stremio.Stremio.Devel.flatpak
           sha256sum com.stremio.Stremio.Devel.flatpak
           flatpak --user install -y --noninteractive com.stremio.Stremio.Devel.flatpak >/dev/null
+          if [ -n "${{ inputs.runtime_commit }}" ]; then flatpak --user update -y --noninteractive --no-related --commit=${{ inputs.runtime_commit }} org.gnome.Platform//50; flatpak --user info org.gnome.Platform//50 | grep -q "${{ inputs.runtime_commit }}" || { echo PIN FAILED; exit 1; }; fi
           flatpak --user info org.gnome.Platform//50 | grep -E 'Version|Commit|Date|Installed'
           flatpak --user info com.stremio.Stremio.Devel | grep -E 'Version|Commit|Runtime|Date'
           flatpak --user list --columns=ref,version,active
