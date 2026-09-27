@@ -3,7 +3,7 @@
 out=$1
 {
   echo "## t=$(date +%s)"
-  for pid in $(pgrep -f 'stremio-linux-shell|libexec/stremio/stremio|WebKitWebProcess|WebKitNetworkProcess|WebKitGPUProcess' ); do
+  for pid in $(pgrep -f 'stremio-linux-shell|libexec/stremio/stremio|mini.py|WebKitWebProcess|WebKitNetworkProcess|WebKitGPUProcess' ); do
     [ -r /proc/$pid/stat ] || continue
     comm=$(cat /proc/$pid/comm 2>/dev/null)
     case "$comm" in bwrap|sh|bash|flatpak*|docker*|timeout|dbus*) continue;; esac

@@ -16,7 +16,10 @@ else
 fi
 measure() { shot "$1"; if [ -f "$out/$1.png" ]; then m=$(python3 "$here/metric.py" "$out/$1.png" $box); else m="no-screenshot"; fi; log "shot $1 $m"; }
 
-if [ "$kind" = flatpak ]; then
+if [ "$kind" = mini ]; then
+  fe=(); for e in "${envs[@]}"; do fe+=("--env=$e"); done
+  cmd=(flatpak run --user --command=python3 --share=network --share=ipc --socket=wayland --socket=fallback-x11 --device=all --filesystem="$here":ro "${fe[@]}" org.gnome.Platform//50 "$here/mini.py")
+elif [ "$kind" = flatpak ]; then
   fe=(); for e in "${envs[@]}"; do fe+=("--env=$e"); done
   cmd=(flatpak run --user "${fe[@]}" com.stremio.Stremio.Devel ${URL:+--url "$URL"})
 else
@@ -45,6 +48,6 @@ fi
 at 75; measure t75
 at 95
 log "alive=$(kill -0 $app 2>/dev/null && echo yes || echo no)"
-if [ "$kind" = source ]; then docker kill "src-$name" >/dev/null 2>&1; else flatpak kill com.stremio.Stremio.Devel 2>/dev/null; fi
+if [ "$kind" = mini ]; then pkill -f mini.py; elif [ "$kind" = source ]; then docker kill "src-$name" >/dev/null 2>&1; else flatpak kill com.stremio.Stremio.Devel 2>/dev/null; fi
 kill $app 2>/dev/null; wait $app 2>/dev/null
 python3 "$here/summary.py" "$out" | tee -a "$out/steps.txt"
