@@ -2,7 +2,7 @@
 # MINI=plain | offloadonly | transp | overlay | offload
 import os, gi
 gi.require_version("Gtk", "4.0"); gi.require_version("WebKit", "6.0"); gi.require_version("Gdk", "4.0")
-from gi.repository import Gtk, Gdk, WebKit, GLib
+from gi.repository import Gtk, Gdk, WebKit, GLib, Gio
 
 mode = os.environ.get("MINI", "plain")
 url = os.environ.get("MINI_URL", "local")
@@ -32,6 +32,6 @@ def activate(app):
     print("MINI mode", mode, "WebKit", WebKit.get_major_version(), WebKit.get_minor_version(), WebKit.get_micro_version(), flush=True)
     win.present()
 
-app = Gtk.Application(application_id="org.example.Mini" + mode.capitalize())
+app = Gtk.Application(application_id="org.example.Mini", flags=Gio.ApplicationFlags.NON_UNIQUE)
 app.connect("activate", activate)
 app.run([])
