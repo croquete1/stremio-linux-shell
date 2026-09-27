@@ -5,7 +5,9 @@ gi.require_version("Gtk", "4.0"); gi.require_version("WebKit", "6.0"); gi.requir
 from gi.repository import Gtk, Gdk, WebKit, GLib
 
 mode = os.environ.get("MINI", "plain")
-url = os.environ.get("MINI_URL", "https://web.stremio.com/")
+url = os.environ.get("MINI_URL", "local")
+if url == "local":
+    url = "file://" + os.path.dirname(os.path.abspath(__file__)) + "/page.html"
 
 def activate(app):
     win = Gtk.ApplicationWindow(application=app, title="Stremio")

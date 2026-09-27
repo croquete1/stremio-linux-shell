@@ -29,6 +29,9 @@ else
        -e SERVER_PATH=/opt/stremio/server.js -e WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 -e RUST_LOG=debug -e GSETTINGS_SCHEMA_DIR=/opt/stremio/schemas
        "${de[@]}" -v "$PWD/srcbin:/opt/stremio" stremio-src dbus-run-session -- /opt/stremio/stremio-linux-shell ${URL:+--url "$URL"})
 fi
+PROBE='import gi, re; gi.require_version("Gtk","4.0"); gi.require_version("WebKit","6.0"); from gi.repository import Gtk, WebKit; info=open("/.flatpak-info").read(); rc=re.search(r"runtime-commit=(\w+)", info); print("SANDBOX WebKitGTK %d.%d.%d GTK %d.%d.%d runtime-commit %s" % (WebKit.get_major_version(), WebKit.get_minor_version(), WebKit.get_micro_version(), Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version(), rc.group(1)[:12] if rc else "?"))'
+if [ "$kind" = flatpak ]; then log "$(flatpak run --user --command=python3 com.stremio.Stremio.Devel -c "$PROBE" 2>&1 | tail -1)"; fi
+if [ "$kind" = mini ]; then log "$(flatpak run --user --command=python3 org.gnome.Platform//50 -c "$PROBE" 2>&1 | tail -1)"; fi
 log "run $name kind=$kind disp=$disp env=${envs[*]:-} url=${URL:-default}"
 "${cmd[@]}" > "$out/app.log" 2>&1 &
 app=$!
