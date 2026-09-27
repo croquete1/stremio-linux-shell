@@ -16,7 +16,28 @@ on:
         default: ""
       url:
         default: ""
+      drm:
+        default: "1"
+      probe:
+        default: "0"
 jobs:
+  probe-runtime:
+    if: ${{ inputs.probe == '1' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: WebKitGTK/GTK/GL per org.gnome.Platform//50 commit
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq flatpak >/dev/null
+          flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y --noninteractive flathub org.gnome.Platform//50 >/dev/null
+          for c in f780e089a0b3bfbde2b3d75e5f23d084583c4ca67d4f6c72f70603c06d486ac2 de3b0b88d9e931daa384fe5444690c68496fa770ddc30e9e14df7bdecc9a4fdc a8da766dd0273a67539d2b98358ed6809d8e729280baf63428108837135229d3 545da92354a265d2c3572c91c39ac14dd7e74f9d8f9b66744ad50f478d2497c5 fc150bcbb560aebb920738976c963cbdb7f83498d583221dadd942870b1bf307 6dfa98d2a83d295937d0a086b0aa299a4f2ada6bcfde5e05445f775cf1d83250 93d500c1a9e7efe8b3ea2d8112301c6192a852cdc6faeb6cf95643e67c4232ce 47406407f781b156c267b67c78a80a60715c0ff34ab2c051029c61d65fe86c11 b1935f7a673108616d4fd84564f15cefc9f637481472a8d4d2f0945375d41f4b; do
+            flatpak --user update -y --noninteractive --commit=$c org.gnome.Platform//50 >/dev/null 2>&1 || { echo "${c:0:12} update failed"; continue; }
+            v=$(flatpak run --user --command=python3 org.gnome.Platform//50 -c 'import gi; gi.require_version("Gtk","4.0"); gi.require_version("WebKit","6.0"); from gi.repository import Gtk, WebKit; print("WebKitGTK %d.%d.%d GTK %d.%d.%d" % (WebKit.get_major_version(), WebKit.get_minor_version(), WebKit.get_micro_version(), Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version()))' 2>&1 | tail -1)
+            d=$(flatpak --user info org.gnome.Platform//50 | grep -E 'Date:' | head -1 | sed 's/.*: //')
+            echo "RUNTIME ${c:0:12} $d $v"
+          done
+          flatpak --user list --runtime --columns=ref,version | grep -i gl
+
   build-source:
     runs-on: ubuntu-24.04
     steps:
@@ -73,6 +94,11 @@ jobs:
           printf 'FROM archlinux:latest\nRUN pacman -Syu --noconfirm --needed gtk4 libadwaita webkitgtk-6.0 mpv libepoxy nodejs dbus mesa >/dev/null && pacman -Q gtk4 libadwaita webkitgtk-6.0 mesa nodejs\n' > Dockerfile.src
           docker build -q -t stremio-src -f Dockerfile.src . && docker run --rm stremio-src pacman -Q gtk4 libadwaita webkitgtk-6.0 mesa
           cat srcbin/arch-versions.txt
+      - name: virtual DRM device
+        if: ${{ (inputs.drm || '1') == '1' }}
+        run: |
+          sudo modprobe vkms || true; sudo modprobe vgem || true
+          sleep 1; ls -l /dev/dri || true; sudo chmod 666 /dev/dri/* 2>/dev/null || true
       - name: display server
         run: |
           mkdir -p -m 700 /tmp/xdg
@@ -81,7 +107,7 @@ jobs:
             sleep 2; DISPLAY=:99 xdpyinfo | head -5 || true
           else
             XDG_RUNTIME_DIR=/tmp/xdg nohup weston --backend=headless --renderer=gl --width=1920 --height=1080 --shell=kiosk --debug --socket=wayland-1 > /tmp/weston.log 2>&1 &
-            sleep 4
+            for i in $(seq 1 30); do [ -S /tmp/xdg/wayland-1 ] && break; sleep 1; done
             if [ ! -S /tmp/xdg/wayland-1 ]; then echo "gl renderer failed, using pixman"; cat /tmp/weston.log | tail -5
               XDG_RUNTIME_DIR=/tmp/xdg nohup weston --backend=headless --renderer=pixman --width=1920 --height=1080 --shell=kiosk --debug --socket=wayland-1 > /tmp/weston.log 2>&1 &
               sleep 4; fi
